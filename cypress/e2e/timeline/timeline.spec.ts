@@ -384,4 +384,10 @@ describe("Timeline", () => {
             );
         });
     });
+
+    describe("interaction with reply messages", () => {
+        it("", () => {
+            
+        });
+    });
 });
