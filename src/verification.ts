@@ -17,6 +17,8 @@ limitations under the License.
 import { User } from "matrix-js-sdk/src/models/user";
 import { verificationMethods as VerificationMethods } from "matrix-js-sdk/src/crypto";
 import { RoomMember } from "matrix-js-sdk/src/matrix";
+import { VerificationRequest } from "matrix-js-sdk/src/crypto/verification/request/VerificationRequest";
+import { CrossSigningKey } from "matrix-js-sdk/src/crypto-api";
 
 import { MatrixClientPeg } from "./MatrixClientPeg";
 import dis from "./dispatcher/dispatcher";
@@ -25,17 +27,16 @@ import { RightPanelPhases } from "./stores/right-panel/RightPanelStorePhases";
 import { accessSecretStorage } from "./SecurityManager";
 import UntrustedDeviceDialog from "./components/views/dialogs/UntrustedDeviceDialog";
 import { IDevice } from "./components/views/right_panel/UserInfo";
-import ManualDeviceKeyVerificationDialog from "./components/views/dialogs/ManualDeviceKeyVerificationDialog";
+import { ManualDeviceKeyVerificationDialog } from "./components/views/dialogs/ManualDeviceKeyVerificationDialog";
 import RightPanelStore from "./stores/right-panel/RightPanelStore";
 import { IRightPanelCardState } from "./stores/right-panel/RightPanelStoreIPanelState";
 import { findDMForUser } from "./utils/dm/findDMForUser";
 
-async function enable4SIfNeeded() {
+async function enable4SIfNeeded(): Promise<boolean> {
     const cli = MatrixClientPeg.get();
-    if (!cli.isCryptoEnabled()) {
-        return false;
-    }
-    const usk = cli.getCrossSigningId("user_signing");
+    const crypto = cli.getCrypto();
+    if (!crypto) return false;
+    const usk = await crypto.getCrossSigningKeyId(CrossSigningKey.UserSigning);
     if (!usk) {
         await accessSecretStorage();
         return false;
@@ -44,7 +45,7 @@ async function enable4SIfNeeded() {
     return true;
 }
 
-export async function verifyDevice(user: User, device: IDevice) {
+export async function verifyDevice(user: User, device: IDevice): Promise<void> {
     const cli = MatrixClientPeg.get();
     if (cli.isGuest()) {
         dis.dispatch({ action: "require_registration" });
@@ -60,7 +61,7 @@ export async function verifyDevice(user: User, device: IDevice) {
     Modal.createDialog(UntrustedDeviceDialog, {
         user,
         device,
-        onFinished: async (action) => {
+        onFinished: async (action): Promise<void> => {
             if (action === "sas") {
                 const verificationRequestPromise = cli.legacyDeviceVerification(
                     user.userId,
@@ -78,7 +79,7 @@ export async function verifyDevice(user: User, device: IDevice) {
     });
 }
 
-export async function legacyVerifyUser(user: User) {
+export async function legacyVerifyUser(user: User): Promise<void> {
     const cli = MatrixClientPeg.get();
     if (cli.isGuest()) {
         dis.dispatch({ action: "require_registration" });
@@ -94,7 +95,7 @@ export async function legacyVerifyUser(user: User) {
     setRightPanel({ member: user, verificationRequestPromise });
 }
 
-export async function verifyUser(user: User) {
+export async function verifyUser(user: User): Promise<void> {
     const cli = MatrixClientPeg.get();
     if (cli.isGuest()) {
         dis.dispatch({ action: "require_registration" });
@@ -107,7 +108,7 @@ export async function verifyUser(user: User) {
     setRightPanel({ member: user, verificationRequest: existingRequest });
 }
 
-function setRightPanel(state: IRightPanelCardState) {
+function setRightPanel(state: IRightPanelCardState): void {
     if (RightPanelStore.instance.roomPhaseHistory.some((card) => card.phase == RightPanelPhases.RoomSummary)) {
         RightPanelStore.instance.pushCard({ phase: RightPanelPhases.EncryptionPanel, state });
     } else {
@@ -119,7 +120,7 @@ function setRightPanel(state: IRightPanelCardState) {
     }
 }
 
-export function pendingVerificationRequestForUser(user: User | RoomMember) {
+export function pendingVerificationRequestForUser(user: User | RoomMember): VerificationRequest | undefined {
     const cli = MatrixClientPeg.get();
     const dmRoom = findDMForUser(cli, user.userId);
     if (dmRoom) {

@@ -14,10 +14,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-import React from "react";
+import React, { ReactNode } from "react";
 import { EventStatus, MatrixEvent } from "matrix-js-sdk/src/models/event";
 import { SyncState, ISyncStateData } from "matrix-js-sdk/src/sync";
 import { Room } from "matrix-js-sdk/src/models/room";
+import { MatrixError } from "matrix-js-sdk/src/matrix";
 
 import { _t, _td } from "../../languageHandler";
 import Resend from "../../Resend";
@@ -29,6 +30,7 @@ import AccessibleButton from "../views/elements/AccessibleButton";
 import InlineSpinner from "../views/elements/InlineSpinner";
 import MatrixClientContext from "../../contexts/MatrixClientContext";
 import { RoomStatusBarUnsentMessages } from "./RoomStatusBarUnsentMessages";
+import ExternalLink from "../views/elements/ExternalLink";
 
 const STATUS_BAR_HIDDEN = 0;
 const STATUS_BAR_EXPANDED = 1;
@@ -146,7 +148,7 @@ export default class RoomStatusBar extends React.PureComponent<IProps, IState> {
         dis.fire(Action.FocusSendMessageComposer);
     };
 
-    private onRoomLocalEchoUpdated = (ev: MatrixEvent, room: Room) => {
+    private onRoomLocalEchoUpdated = (ev: MatrixEvent, room: Room): void => {
         if (room.roomId !== this.props.room.roomId) return;
         const messages = getUnsentMessages(this.props.room);
         this.setState({
@@ -192,10 +194,10 @@ export default class RoomStatusBar extends React.PureComponent<IProps, IState> {
     private getUnsentMessageContent(): JSX.Element {
         const unsentMessages = this.state.unsentMessages;
 
-        let title;
+        let title: ReactNode;
 
-        let consentError = null;
-        let resourceLimitError = null;
+        let consentError: MatrixError | null = null;
+        let resourceLimitError: MatrixError | null = null;
         for (const m of unsentMessages) {
             if (m.error && m.error.errcode === "M_CONSENT_NOT_GIVEN") {
                 consentError = m.error;
@@ -212,9 +214,9 @@ export default class RoomStatusBar extends React.PureComponent<IProps, IState> {
                 {},
                 {
                     consentLink: (sub) => (
-                        <a href={consentError.data && consentError.data.consent_uri} target="_blank">
+                        <ExternalLink href={consentError!.data?.consent_uri} target="_blank" rel="noreferrer noopener">
                             {sub}
-                        </a>
+                        </ExternalLink>
                     ),
                 },
             );
@@ -271,7 +273,7 @@ export default class RoomStatusBar extends React.PureComponent<IProps, IState> {
         );
     }
 
-    public render(): JSX.Element {
+    public render(): React.ReactNode {
         if (this.shouldShowConnectionError()) {
             return (
                 <div className="mx_RoomStatusBar">
@@ -281,8 +283,7 @@ export default class RoomStatusBar extends React.PureComponent<IProps, IState> {
                                 src={require("../../../res/img/feather-customised/warning-triangle.svg").default}
                                 width="24"
                                 height="24"
-                                title="/!\ "
-                                alt="/!\ "
+                                alt=""
                             />
                             <div>
                                 <div className="mx_RoomStatusBar_connectionLostBar_title">

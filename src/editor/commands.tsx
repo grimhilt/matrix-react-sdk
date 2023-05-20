@@ -21,7 +21,7 @@ import { IContent } from "matrix-js-sdk/src/models/event";
 import EditorModel from "./model";
 import { Type } from "./parts";
 import { Command, CommandCategories, getCommand } from "../SlashCommands";
-import { ITranslatableError, _t, _td } from "../languageHandler";
+import { UserFriendlyError, _t, _td } from "../languageHandler";
 import Modal from "../Modal";
 import ErrorDialog from "../components/views/dialogs/ErrorDialog";
 import QuestionDialog from "../components/views/dialogs/QuestionDialog";
@@ -45,7 +45,7 @@ export function isSlashCommand(model: EditorModel): boolean {
     return false;
 }
 
-export function getSlashCommand(model: EditorModel): [Command, string, string] {
+export function getSlashCommand(model: EditorModel): [Command | undefined, string | undefined, string] {
     const commandText = model.parts.reduce((text, part) => {
         // use mxid to textify user pills in a command and room alias/id for room pills
         if (part.type === Type.UserPill || part.type === Type.RoomPill) {
@@ -59,17 +59,17 @@ export function getSlashCommand(model: EditorModel): [Command, string, string] {
 
 export async function runSlashCommand(
     cmd: Command,
-    args: string,
+    args: string | undefined,
     roomId: string,
     threadId: string | null,
 ): Promise<[content: IContent | null, success: boolean]> {
     const result = cmd.run(roomId, threadId, args);
     let messageContent: IContent | null = null;
-    let error = result.error;
+    let error: any = result.error;
     if (result.promise) {
         try {
             if (cmd.category === CommandCategories.messages || cmd.category === CommandCategories.effects) {
-                messageContent = await result.promise;
+                messageContent = (await result.promise) ?? null;
             } else {
                 await result.promise;
             }
@@ -78,7 +78,7 @@ export async function runSlashCommand(
         }
     }
     if (error) {
-        logger.error("Command failure: %s", error);
+        logger.error(`Command failure: ${error}`);
         // assume the error is a server error when the command is async
         const isServerError = !!result.promise;
         const title = isServerError ? _td("Server error") : _td("Command error");
@@ -86,9 +86,8 @@ export async function runSlashCommand(
         let errText;
         if (typeof error === "string") {
             errText = error;
-        } else if ((error as ITranslatableError).translatedMessage) {
-            // Check for translatable errors (newTranslatableError)
-            errText = (error as ITranslatableError).translatedMessage;
+        } else if (error instanceof UserFriendlyError) {
+            errText = error.translatedMessage;
         } else if (error.message) {
             errText = error.message;
         } else {
@@ -137,5 +136,5 @@ export async function shouldSendAnyway(commandText: string): Promise<boolean> {
         button: _t("Send as message"),
     });
     const [sendAnyway] = await finished;
-    return sendAnyway;
+    return sendAnyway || false;
 }

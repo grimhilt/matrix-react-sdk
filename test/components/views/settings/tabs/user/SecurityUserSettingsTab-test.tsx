@@ -14,6 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 import { fireEvent, render } from "@testing-library/react";
+import { UNSTABLE_MSC3882_CAPABILITY } from "matrix-js-sdk/src/matrix";
 import React from "react";
 
 import SecurityUserSettingsTab from "../../../../../../src/components/views/settings/tabs/user/SecurityUserSettingsTab";
@@ -45,8 +46,12 @@ describe("<SecurityUserSettingsTab />", () => {
         getIgnoredUsers: jest.fn(),
         getVersions: jest.fn().mockResolvedValue({
             unstable_features: {
-                "org.matrix.msc3882": true,
                 "org.matrix.msc3886": true,
+            },
+        }),
+        getCapabilities: jest.fn().mockResolvedValue({
+            [UNSTABLE_MSC3882_CAPABILITY.name]: {
+                enabled: true,
             },
         }),
     });
@@ -79,17 +84,7 @@ describe("<SecurityUserSettingsTab />", () => {
         expect(queryByTestId("devices-section")).toBeFalsy();
     });
 
-    it("does not render qr code login section when disabled", () => {
-        settingsValueSpy.mockReturnValue(false);
-        const { queryByText } = render(getComponent());
-
-        expect(settingsValueSpy).toHaveBeenCalledWith("feature_qr_signin_reciprocate_show");
-
-        expect(queryByText("Sign in with QR code")).toBeFalsy();
-    });
-
-    it("renders qr code login section when enabled", async () => {
-        settingsValueSpy.mockImplementation((settingName) => settingName === "feature_qr_signin_reciprocate_show");
+    it("renders qr code login section", async () => {
         const { getByText } = render(getComponent());
 
         // wait for versions call to settle
@@ -99,7 +94,6 @@ describe("<SecurityUserSettingsTab />", () => {
     });
 
     it("enters qr code login section when show QR code button clicked", async () => {
-        settingsValueSpy.mockImplementation((settingName) => settingName === "feature_qr_signin_reciprocate_show");
         const { getByText, getByTestId } = render(getComponent());
         // wait for versions call to settle
         await flushPromises();

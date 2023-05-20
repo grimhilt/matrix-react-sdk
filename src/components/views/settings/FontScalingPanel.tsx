@@ -27,6 +27,7 @@ import { Layout } from "../../../settings/enums/Layout";
 import { MatrixClientPeg } from "../../../MatrixClientPeg";
 import { SettingLevel } from "../../../settings/SettingLevel";
 import { _t } from "../../../languageHandler";
+import { clamp } from "../../../utils/numbers";
 
 interface IProps {}
 
@@ -39,8 +40,8 @@ interface IState {
     layout: Layout;
     // User profile data for the message preview
     userId?: string;
-    displayName: string;
-    avatarUrl: string;
+    displayName?: string;
+    avatarUrl?: string;
 }
 
 export default class FontScalingPanel extends React.Component<IProps, IState> {
@@ -55,16 +56,13 @@ export default class FontScalingPanel extends React.Component<IProps, IState> {
             fontSize: (SettingsStore.getValue("baseFontSize", null) + FontWatcher.SIZE_DIFF).toString(),
             useCustomFontSize: SettingsStore.getValue("useCustomFontSize"),
             layout: SettingsStore.getValue("layout"),
-            userId: null,
-            displayName: null,
-            avatarUrl: null,
         };
     }
 
-    public async componentDidMount() {
+    public async componentDidMount(): Promise<void> {
         // Fetch the current user profile for the message preview
         const client = MatrixClientPeg.get();
-        const userId = client.getUserId();
+        const userId = client.getUserId()!;
         const profileInfo = await client.getProfileInfo(userId);
         if (this.unmounted) return;
 
@@ -75,7 +73,7 @@ export default class FontScalingPanel extends React.Component<IProps, IState> {
         });
     }
 
-    public componentWillUnmount() {
+    public componentWillUnmount(): void {
         this.unmounted = true;
     }
 
@@ -85,7 +83,7 @@ export default class FontScalingPanel extends React.Component<IProps, IState> {
     };
 
     private onValidateFontSize = async ({ value }: Pick<IFieldState, "value">): Promise<IValidationResult> => {
-        const parsedSize = parseFloat(value);
+        const parsedSize = parseFloat(value!);
         const min = FontWatcher.MIN_SIZE + FontWatcher.SIZE_DIFF;
         const max = FontWatcher.MAX_SIZE + FontWatcher.SIZE_DIFF;
 
@@ -100,12 +98,15 @@ export default class FontScalingPanel extends React.Component<IProps, IState> {
             };
         }
 
-        SettingsStore.setValue("baseFontSize", null, SettingLevel.DEVICE, parseInt(value, 10) - FontWatcher.SIZE_DIFF);
+        SettingsStore.setValue("baseFontSize", null, SettingLevel.DEVICE, parseInt(value!, 10) - FontWatcher.SIZE_DIFF);
 
         return { valid: true, feedback: _t("Use between %(min)s pt and %(max)s pt", { min, max }) };
     };
 
-    public render() {
+    public render(): React.ReactNode {
+        const min = 13;
+        const max = 18;
+
         return (
             <div className="mx_SettingsTab_section mx_FontScalingPanel">
                 <span className="mx_SettingsTab_subheading">{_t("Font size")}</span>
@@ -120,11 +121,14 @@ export default class FontScalingPanel extends React.Component<IProps, IState> {
                 <div className="mx_FontScalingPanel_fontSlider">
                     <div className="mx_FontScalingPanel_fontSlider_smallText">Aa</div>
                     <Slider
-                        values={[13, 14, 15, 16, 18]}
+                        min={min}
+                        max={max}
+                        step={1}
                         value={parseInt(this.state.fontSize, 10)}
-                        onSelectionChange={this.onFontSizeChanged}
+                        onChange={this.onFontSizeChanged}
                         displayFunc={(_) => ""}
                         disabled={this.state.useCustomFontSize}
+                        label={_t("Font size")}
                     />
                     <div className="mx_FontScalingPanel_fontSlider_largeText">Aa</div>
                 </div>
@@ -132,7 +136,16 @@ export default class FontScalingPanel extends React.Component<IProps, IState> {
                 <SettingsFlag
                     name="useCustomFontSize"
                     level={SettingLevel.ACCOUNT}
-                    onChange={(checked) => this.setState({ useCustomFontSize: checked })}
+                    onChange={(checked) => {
+                        this.setState({ useCustomFontSize: checked });
+                        if (!checked) {
+                            const size = parseInt(this.state.fontSize, 10);
+                            const clamped = clamp(size, min, max);
+                            if (clamped !== size) {
+                                this.onFontSizeChanged(clamped);
+                            }
+                        }
+                    }}
                     useCheckbox={true}
                 />
 

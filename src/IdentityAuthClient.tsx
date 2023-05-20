@@ -16,7 +16,7 @@ limitations under the License.
 
 import React from "react";
 import { SERVICE_TYPES } from "matrix-js-sdk/src/service-types";
-import { createClient, MatrixClient } from "matrix-js-sdk/src/matrix";
+import { createClient, MatrixClient, MatrixError } from "matrix-js-sdk/src/matrix";
 import { logger } from "matrix-js-sdk/src/logger";
 
 import { MatrixClientPeg } from "./MatrixClientPeg";
@@ -34,8 +34,8 @@ import { abbreviateUrl } from "./utils/UrlUtils";
 export class AbortedIdentityActionError extends Error {}
 
 export default class IdentityAuthClient {
-    private accessToken: string;
-    private tempClient: MatrixClient;
+    private accessToken: string | null = null;
+    private tempClient?: MatrixClient;
     private authEnabled = true;
 
     /**
@@ -67,7 +67,7 @@ export default class IdentityAuthClient {
         window.localStorage.setItem("mx_is_access_token", this.accessToken);
     }
 
-    private readToken(): string {
+    private readToken(): string | null {
         if (this.tempClient) return null; // temporary client: ignore
         return window.localStorage.getItem("mx_is_access_token");
     }
@@ -77,13 +77,13 @@ export default class IdentityAuthClient {
     }
 
     // Returns a promise that resolves to the access_token string from the IS
-    public async getAccessToken({ check = true } = {}): Promise<string> {
+    public async getAccessToken({ check = true } = {}): Promise<string | null> {
         if (!this.authEnabled) {
             // The current IS doesn't support authentication
             return null;
         }
 
-        let token = this.accessToken;
+        let token: string | null = this.accessToken;
         if (!token) {
             token = this.readToken();
         }
@@ -118,12 +118,12 @@ export default class IdentityAuthClient {
     }
 
     private async checkToken(token: string): Promise<void> {
-        const identityServerUrl = this.matrixClient.getIdentityServerUrl();
+        const identityServerUrl = this.matrixClient.getIdentityServerUrl()!;
 
         try {
             await this.matrixClient.getIdentityAccount(token);
         } catch (e) {
-            if (e.errcode === "M_TERMS_NOT_SIGNED") {
+            if (e instanceof MatrixError && e.errcode === "M_TERMS_NOT_SIGNED") {
                 logger.log("Identity server requires new terms to be agreed to");
                 await startTermsFlow([new Service(SERVICE_TYPES.IS, identityServerUrl, token)]);
                 return;

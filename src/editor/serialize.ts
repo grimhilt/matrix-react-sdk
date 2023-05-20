@@ -16,7 +16,7 @@ limitations under the License.
 */
 
 import { encode } from "html-entities";
-import cheerio from "cheerio";
+import { load as cheerio } from "cheerio";
 import escapeHtml from "escape-html";
 
 import Markdown from "../Markdown";
@@ -63,7 +63,7 @@ interface ISerializeOpts {
 export function htmlSerializeIfNeeded(
     model: EditorModel,
     { forceHTML = false, useMarkdown = true }: ISerializeOpts = {},
-): string {
+): string | undefined {
     if (!useMarkdown) {
         return escapeHtml(textSerialize(model)).replace(/\n/g, "<br/>");
     }
@@ -72,13 +72,13 @@ export function htmlSerializeIfNeeded(
     return htmlSerializeFromMdIfNeeded(md, { forceHTML });
 }
 
-export function htmlSerializeFromMdIfNeeded(md: string, { forceHTML = false } = {}): string {
+export function htmlSerializeFromMdIfNeeded(md: string, { forceHTML = false } = {}): string | undefined {
     // copy of raw input to remove unwanted math later
     const orig = md;
 
     if (SettingsStore.getValue("feature_latex_maths")) {
-        const patternNames = ["tex", "latex"];
-        const patternTypes = ["display", "inline"];
+        const patternNames = ["tex", "latex"] as const;
+        const patternTypes = ["display", "inline"] as const;
         const patternDefaults = {
             tex: {
                 // detect math with tex delimiters, inline: $...$, display $$...$$
@@ -118,7 +118,7 @@ export function htmlSerializeFromMdIfNeeded(md: string, { forceHTML = false } = 
             patternTypes.forEach(function (patternType) {
                 // get the regex replace pattern from config or use the default
                 const pattern =
-                    (((SdkConfig.get("latex_maths_delims") || {})[patternType] || {})["pattern"] || {})[patternName] ||
+                    SdkConfig.get("latex_maths_delims")?.[patternType]?.["pattern"]?.[patternName] ||
                     patternDefaults[patternName][patternType];
 
                 md = md.replace(RegExp(pattern, "gms"), function (m, p1, p2) {
@@ -143,7 +143,7 @@ export function htmlSerializeFromMdIfNeeded(md: string, { forceHTML = false } = 
     const parser = new Markdown(md);
     if (!parser.isPlainText() || forceHTML) {
         // feed Markdown output to HTML parser
-        const phtml = cheerio.load(parser.toHTML(), {
+        const phtml = cheerio(parser.toHTML(), {
             // @ts-ignore: The `_useHtmlParser2` internal option is the
             // simplest way to both parse and render using `htmlparser2`.
             _useHtmlParser2: true,
@@ -153,7 +153,7 @@ export function htmlSerializeFromMdIfNeeded(md: string, { forceHTML = false } = 
         if (SettingsStore.getValue("feature_latex_maths")) {
             // original Markdown without LaTeX replacements
             const parserOrig = new Markdown(orig);
-            const phtmlOrig = cheerio.load(parserOrig.toHTML(), {
+            const phtmlOrig = cheerio(parserOrig.toHTML(), {
                 // @ts-ignore: The `_useHtmlParser2` internal option is the
                 // simplest way to both parse and render using `htmlparser2`.
                 _useHtmlParser2: true,

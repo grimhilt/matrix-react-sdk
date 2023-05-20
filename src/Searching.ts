@@ -34,7 +34,7 @@ const SEARCH_LIMIT = 10;
 
 async function serverSideSearch(
     term: string,
-    roomId: string = undefined,
+    roomId?: string,
     abortSignal?: AbortSignal,
 ): Promise<{ response: ISearchResponse; query: ISearchRequestBody }> {
     const client = MatrixClientPeg.get();
@@ -67,7 +67,7 @@ async function serverSideSearch(
 
 async function serverSideSearchProcess(
     term: string,
-    roomId: string = undefined,
+    roomId?: string,
     abortSignal?: AbortSignal,
 ): Promise<ISearchResults> {
     const client = MatrixClientPeg.get();
@@ -158,7 +158,7 @@ async function combinedSearch(searchTerm: string, abortSignal?: AbortSignal): Pr
 
 async function localSearch(
     searchTerm: string,
-    roomId: string = undefined,
+    roomId?: string,
     processResult = true,
 ): Promise<{ response: IResultRoomEvents; query: ISearchArgs }> {
     const eventIndex = EventIndexPeg.get();
@@ -176,7 +176,10 @@ async function localSearch(
         searchArgs.room_id = roomId;
     }
 
-    const localResult = await eventIndex.search(searchArgs);
+    const localResult = await eventIndex!.search(searchArgs);
+    if (!localResult) {
+        throw new Error("Local search failed");
+    }
 
     searchArgs.next_batch = localResult.next_batch;
 
@@ -195,7 +198,7 @@ export interface ISeshatSearchResults extends ISearchResults {
     serverSideNextBatch?: string;
 }
 
-async function localSearchProcess(searchTerm: string, roomId: string = undefined): Promise<ISeshatSearchResults> {
+async function localSearchProcess(searchTerm: string, roomId?: string): Promise<ISeshatSearchResults> {
     const emptyResult = {
         results: [],
         highlights: [],
@@ -225,7 +228,11 @@ async function localPagination(searchResult: ISeshatSearchResults): Promise<ISes
 
     const searchArgs = searchResult.seshatQuery;
 
-    const localResult = await eventIndex.search(searchArgs);
+    const localResult = await eventIndex!.search(searchArgs);
+    if (!localResult) {
+        throw new Error("Local search pagination failed");
+    }
+
     searchResult.seshatQuery.next_batch = localResult.next_batch;
 
     // We only need to restore the encryption state for the new results, so
@@ -244,7 +251,7 @@ async function localPagination(searchResult: ISeshatSearchResults): Promise<ISes
     const newSlice = result.results.slice(Math.max(result.results.length - newResultCount, 0));
     restoreEncryptionInfo(newSlice);
 
-    searchResult.pendingRequest = null;
+    searchResult.pendingRequest = undefined;
 
     return result;
 }
@@ -388,8 +395,8 @@ function combineEventSources(
  */
 function combineEvents(
     previousSearchResult: ISeshatSearchResults,
-    localEvents: IResultRoomEvents = undefined,
-    serverEvents: IResultRoomEvents = undefined,
+    localEvents?: IResultRoomEvents,
+    serverEvents?: IResultRoomEvents,
 ): IResultRoomEvents {
     const response = {} as IResultRoomEvents;
 
@@ -451,8 +458,8 @@ function combineEvents(
  */
 function combineResponses(
     previousSearchResult: ISeshatSearchResults,
-    localEvents: IResultRoomEvents = undefined,
-    serverEvents: IResultRoomEvents = undefined,
+    localEvents: IResultRoomEvents,
+    serverEvents: IResultRoomEvents,
 ): IResultRoomEvents {
     // Combine our events first.
     const response = combineEvents(previousSearchResult, localEvents, serverEvents);
@@ -477,7 +484,7 @@ function combineResponses(
     // Set the response next batch token to one of the tokens from the sources,
     // this makes sure that if we exhaust one of the sources we continue with
     // the other one.
-    if (previousSearchResult.seshatQuery.next_batch) {
+    if (previousSearchResult.seshatQuery?.next_batch) {
         response.next_batch = previousSearchResult.seshatQuery.next_batch;
     } else if (previousSearchResult.serverSideNextBatch) {
         response.next_batch = previousSearchResult.serverSideNextBatch;
@@ -496,10 +503,10 @@ function combineResponses(
 }
 
 interface IEncryptedSeshatEvent {
-    curve25519Key: string;
-    ed25519Key: string;
-    algorithm: string;
-    forwardingCurve25519KeyChain: string[];
+    curve25519Key?: string;
+    ed25519Key?: string;
+    algorithm?: string;
+    forwardingCurve25519KeyChain?: string[];
 }
 
 function restoreEncryptionInfo(searchResultSlice: SearchResult[] = []): void {
@@ -514,7 +521,7 @@ function restoreEncryptionInfo(searchResultSlice: SearchResult[] = []): void {
                     EventType.RoomMessageEncrypted,
                     { algorithm: ev.algorithm },
                     ev.curve25519Key,
-                    ev.ed25519Key,
+                    ev.ed25519Key!,
                 );
                 // @ts-ignore
                 mxEv.forwardingCurve25519KeyChain = ev.forwardingCurve25519KeyChain;
@@ -535,13 +542,13 @@ async function combinedPagination(searchResult: ISeshatSearchResults): Promise<I
     const searchArgs = searchResult.seshatQuery;
     const oldestEventFrom = searchResult.oldestEventFrom;
 
-    let localResult: IResultRoomEvents;
-    let serverSideResult: ISearchResponse;
+    let localResult: IResultRoomEvents | undefined;
+    let serverSideResult: ISearchResponse | undefined;
 
     // Fetch events from the local index if we have a token for it and if it's
     // the local indexes turn or the server has exhausted its results.
-    if (searchArgs.next_batch && (!searchResult.serverSideNextBatch || oldestEventFrom === "server")) {
-        localResult = await eventIndex.search(searchArgs);
+    if (searchArgs?.next_batch && (!searchResult.serverSideNextBatch || oldestEventFrom === "server")) {
+        localResult = await eventIndex!.search(searchArgs);
     }
 
     // Fetch events from the server if we have a token for it and if it's the
@@ -551,7 +558,7 @@ async function combinedPagination(searchResult: ISeshatSearchResults): Promise<I
         serverSideResult = await client.search(body);
     }
 
-    let serverEvents: IResultRoomEvents;
+    let serverEvents: IResultRoomEvents | undefined;
 
     if (serverSideResult) {
         serverEvents = serverSideResult.search_categories.room_events;
@@ -576,16 +583,12 @@ async function combinedPagination(searchResult: ISeshatSearchResults): Promise<I
     const newSlice = result.results.slice(Math.max(result.results.length - newResultCount, 0));
     restoreEncryptionInfo(newSlice);
 
-    searchResult.pendingRequest = null;
+    searchResult.pendingRequest = undefined;
 
     return result;
 }
 
-function eventIndexSearch(
-    term: string,
-    roomId: string = undefined,
-    abortSignal?: AbortSignal,
-): Promise<ISearchResults> {
+function eventIndexSearch(term: string, roomId?: string, abortSignal?: AbortSignal): Promise<ISearchResults> {
     let searchPromise: Promise<ISearchResults>;
 
     if (roomId !== undefined) {
@@ -643,11 +646,7 @@ export function searchPagination(searchResult: ISearchResults): Promise<ISearchR
     else return eventIndexSearchPagination(searchResult);
 }
 
-export default function eventSearch(
-    term: string,
-    roomId: string = undefined,
-    abortSignal?: AbortSignal,
-): Promise<ISearchResults> {
+export default function eventSearch(term: string, roomId?: string, abortSignal?: AbortSignal): Promise<ISearchResults> {
     const eventIndex = EventIndexPeg.get();
 
     if (eventIndex === null) {

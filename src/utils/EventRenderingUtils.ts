@@ -16,7 +16,7 @@ limitations under the License.
 
 import { MatrixEvent } from "matrix-js-sdk/src/models/event";
 import { EventType, MsgType } from "matrix-js-sdk/src/@types/event";
-import { M_POLL_START } from "matrix-events-sdk";
+import { M_POLL_END, M_POLL_START } from "matrix-js-sdk/src/@types/polls";
 import { M_BEACON_INFO } from "matrix-js-sdk/src/@types/beacon";
 import { IContent } from "matrix-js-sdk/src/matrix";
 
@@ -41,6 +41,7 @@ const calcIsInfoMessage = (
         eventType !== EventType.Sticker &&
         eventType !== EventType.RoomCreate &&
         !M_POLL_START.matches(eventType) &&
+        !M_POLL_END.matches(eventType) &&
         !M_BEACON_INFO.matches(eventType) &&
         !(eventType === VoiceBroadcastInfoEventType && content?.state === VoiceBroadcastInfoState.Started)
     );
@@ -94,7 +95,8 @@ export function getEventDisplayInfo(
         (eventType === EventType.RoomMessage && msgtype === MsgType.Emote) ||
         M_POLL_START.matches(eventType) ||
         M_BEACON_INFO.matches(eventType) ||
-        isLocationEvent(mxEvent);
+        isLocationEvent(mxEvent) ||
+        eventType === VoiceBroadcastInfoEventType;
 
     // If we're showing hidden events in the timeline, we should use the
     // source tile when there's no regular tile for an event and also for

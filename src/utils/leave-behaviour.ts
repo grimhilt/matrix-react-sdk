@@ -15,10 +15,11 @@ limitations under the License.
 */
 
 import { sleep } from "matrix-js-sdk/src/utils";
-import React from "react";
+import React, { ReactNode } from "react";
 import { EventStatus } from "matrix-js-sdk/src/models/event-status";
 import { MatrixEventEvent } from "matrix-js-sdk/src/models/event";
 import { Room } from "matrix-js-sdk/src/models/room";
+import { MatrixError } from "matrix-js-sdk/src/matrix";
 
 import Modal, { IHandle } from "../Modal";
 import Spinner from "../components/views/elements/Spinner";
@@ -35,16 +36,21 @@ import LeaveSpaceDialog from "../components/views/dialogs/LeaveSpaceDialog";
 import { AfterLeaveRoomPayload } from "../dispatcher/payloads/AfterLeaveRoomPayload";
 import { bulkSpaceBehaviour } from "./space";
 import { SdkContextClass } from "../contexts/SDKContext";
+import SettingsStore from "../settings/SettingsStore";
 
-export async function leaveRoomBehaviour(roomId: string, retry = true, spinner = true) {
-    let spinnerModal: IHandle<any>;
+export async function leaveRoomBehaviour(roomId: string, retry = true, spinner = true): Promise<void> {
+    let spinnerModal: IHandle<any> | undefined;
     if (spinner) {
-        spinnerModal = Modal.createDialog(Spinner, null, "mx_Dialog_spinner");
+        spinnerModal = Modal.createDialog(Spinner, undefined, "mx_Dialog_spinner");
     }
 
     const cli = MatrixClientPeg.get();
     let leavingAllVersions = true;
-    const history = cli.getRoomUpgradeHistory(roomId);
+    const history = cli.getRoomUpgradeHistory(
+        roomId,
+        false,
+        SettingsStore.getValue("feature_dynamic_room_predecessors"),
+    );
     if (history && history.length > 0) {
         const currentRoom = history[history.length - 1];
         if (currentRoom.roomId !== roomId) {
@@ -55,17 +61,23 @@ export async function leaveRoomBehaviour(roomId: string, retry = true, spinner =
     }
 
     const room = cli.getRoom(roomId);
+
+    // should not encounter this
+    if (!room) {
+        throw new Error(`Expected to find room for id ${roomId}`);
+    }
+
     // await any queued messages being sent so that they do not fail
     await Promise.all(
         room
             .getPendingEvents()
             .filter((ev) => {
-                return [EventStatus.QUEUED, EventStatus.ENCRYPTING, EventStatus.SENDING].includes(ev.status);
+                return [EventStatus.QUEUED, EventStatus.ENCRYPTING, EventStatus.SENDING].includes(ev.status!);
             })
             .map(
                 (ev) =>
                     new Promise<void>((resolve, reject) => {
-                        const handler = () => {
+                        const handler = (): void => {
                             if (ev.status === EventStatus.NOT_SENT) {
                                 spinnerModal?.close();
                                 reject(ev.error);
@@ -82,7 +94,7 @@ export async function leaveRoomBehaviour(roomId: string, retry = true, spinner =
             ),
     );
 
-    let results: { [roomId: string]: Error & { errcode?: string; message: string; data?: Record<string, any> } } = {};
+    let results: { [roomId: string]: Error | MatrixError | null } = {};
     if (!leavingAllVersions) {
         try {
             await cli.leave(roomId);
@@ -99,7 +111,9 @@ export async function leaveRoomBehaviour(roomId: string, retry = true, spinner =
     }
 
     if (retry) {
-        const limitExceededError = Object.values(results).find((e) => e?.errcode === "M_LIMIT_EXCEEDED");
+        const limitExceededError = Object.values(results).find(
+            (e) => (e as MatrixError)?.errcode === "M_LIMIT_EXCEEDED",
+        ) as MatrixError;
         if (limitExceededError) {
             await sleep(limitExceededError.data.retry_after_ms ?? 100);
             return leaveRoomBehaviour(roomId, false, false);
@@ -110,11 +124,11 @@ export async function leaveRoomBehaviour(roomId: string, retry = true, spinner =
 
     const errors = Object.entries(results).filter((r) => !!r[1]);
     if (errors.length > 0) {
-        const messages = [];
+        const messages: ReactNode[] = [];
         for (const roomErr of errors) {
-            const err = roomErr[1]; // [0] is the roomId
+            const err = roomErr[1] as MatrixError; // [0] is the roomId
             let message = _t("Unexpected server error trying to leave the room");
-            if (err.errcode && err.message) {
+            if (err?.errcode && err.message) {
                 if (err.errcode === "M_CANNOT_LEAVE_SERVER_NOTICE_ROOM") {
                     Modal.createDialog(ErrorDialog, {
                         title: _t("Can't leave Server Notices room"),
@@ -125,7 +139,7 @@ export async function leaveRoomBehaviour(roomId: string, retry = true, spinner =
                     });
                     return;
                 }
-                message = results[roomId].message;
+                message = results[roomId]!.message;
             }
             messages.push(message, React.createElement("BR")); // createElement to avoid using a tsx file in utils
         }
@@ -165,12 +179,12 @@ export async function leaveRoomBehaviour(roomId: string, retry = true, spinner =
     }
 }
 
-export const leaveSpace = (space: Room) => {
+export const leaveSpace = (space: Room): void => {
     Modal.createDialog(
         LeaveSpaceDialog,
         {
             space,
-            onFinished: async (leave: boolean, rooms: Room[]) => {
+            onFinished: async (leave: boolean, rooms: Room[]): Promise<void> => {
                 if (!leave) return;
                 await bulkSpaceBehaviour(space, rooms, (room) => leaveRoomBehaviour(room.roomId));
 

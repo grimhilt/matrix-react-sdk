@@ -15,11 +15,10 @@ limitations under the License.
 */
 
 import type { VerificationRequest } from "matrix-js-sdk/src/crypto/verification/request/VerificationRequest";
-import type { ISasEvent } from "matrix-js-sdk/src/crypto/verification/SAS";
 import type { MatrixClient } from "matrix-js-sdk/src/matrix";
-import { SynapseInstance } from "../../plugins/synapsedocker";
+import { HomeserverInstance } from "../../plugins/utils/homeserver";
 import { UserCredentials } from "../../support/login";
-import Chainable = Cypress.Chainable;
+import { handleVerificationRequest } from "./utils";
 
 const ROOM_NAME = "Test room";
 const TEST_USER = "Alia";
@@ -39,37 +38,43 @@ const waitForVerificationRequest = (cli: MatrixClient): Promise<VerificationRequ
     });
 };
 
-const handleVerificationRequest = (request: VerificationRequest): Chainable<EmojiMapping[]> => {
-    return cy.wrap(
-        new Promise<EmojiMapping[]>((resolve) => {
-            const onShowSas = (event: ISasEvent) => {
-                verifier.off("show_sas", onShowSas);
-                event.confirm();
-                resolve(event.sas.emoji);
-            };
+const checkTimelineNarrow = (button = true) => {
+    cy.viewport(800, 600); // SVGA
+    cy.get(".mx_LeftPanel_minimized").should("exist"); // Wait until the left panel is minimized
+    cy.findByRole("button", { name: "Room info" }).click(); // Open the right panel to make the timeline narrow
+    cy.get(".mx_BaseCard").should("exist");
 
-            const verifier = request.beginKeyVerification("m.sas.v1");
-            verifier.on("show_sas", onShowSas);
-            verifier.verify();
-        }),
-    );
+    // Ensure the failure bar does not cover the timeline
+    cy.get(".mx_RoomView_body .mx_EventTile.mx_EventTile_last").should("be.visible");
+
+    // Ensure the indicator does not overflow the timeline
+    cy.findByTestId("decryption-failure-bar-indicator").should("be.visible");
+
+    if (button) {
+        // Ensure the button does not overflow the timeline
+        cy.get("[data-testid='decryption-failure-bar-button']:last-of-type").should("be.visible");
+    }
+
+    cy.findByRole("button", { name: "Room info" }).click(); // Close the right panel
+    cy.get(".mx_BaseCard").should("not.exist");
+    cy.viewport(1000, 660); // Reset to the default size
 };
 
 describe("Decryption Failure Bar", () => {
-    let synapse: SynapseInstance | undefined;
+    let homeserver: HomeserverInstance | undefined;
     let testUser: UserCredentials | undefined;
     let bot: MatrixClient | undefined;
     let roomId: string;
 
     beforeEach(function () {
-        cy.startSynapse("default").then((syn: SynapseInstance) => {
-            synapse = syn;
-            cy.initTestUser(synapse, TEST_USER)
+        cy.startHomeserver("default").then((hs: HomeserverInstance) => {
+            homeserver = hs;
+            cy.initTestUser(homeserver, TEST_USER)
                 .then((creds: UserCredentials) => {
                     testUser = creds;
                 })
                 .then(() => {
-                    cy.getBot(synapse, { displayName: BOT_USER }).then((cli) => {
+                    cy.getBot(homeserver, { displayName: BOT_USER }).then((cli) => {
                         bot = cli;
                     });
                 })
@@ -81,7 +86,7 @@ describe("Decryption Failure Bar", () => {
                 .then(() => {
                     cy.inviteUser(roomId, bot.getUserId());
                     cy.visit("/#/room/" + roomId);
-                    cy.contains(".mx_TextualEvent", BOT_USER + " joined the room").should("exist");
+                    cy.findByText(BOT_USER + " joined the room").should("exist");
                 })
                 .then(() => {
                     cy.getClient()
@@ -97,7 +102,7 @@ describe("Decryption Failure Bar", () => {
     });
 
     afterEach(() => {
-        cy.stopSynapse(synapse);
+        cy.stopHomeserver(homeserver);
     });
 
     it(
@@ -105,34 +110,43 @@ describe("Decryption Failure Bar", () => {
             "and there are other verified devices or backups",
         () => {
             let otherDevice: MatrixClient | undefined;
-            cy.loginBot(synapse, testUser.username, testUser.password, {})
+            cy.loginBot(homeserver, testUser.username, testUser.password, { bootstrapCrossSigning: true })
                 .then(async (cli) => {
                     otherDevice = cli;
-                    await otherDevice.bootstrapCrossSigning({
-                        authUploadDeviceSigningKeys: async (makeRequest) => {
-                            await makeRequest({});
-                        },
-                        setupNewCrossSigning: true,
-                    });
                 })
                 .then(() => {
                     cy.botSendMessage(bot, roomId, "test");
-                    cy.wait(5000);
-                    cy.get(".mx_DecryptionFailureBar .mx_DecryptionFailureBar_message_headline").should(
-                        "have.text",
-                        "Verify this device to access all messages",
+                    cy.get(".mx_DecryptionFailureBar_start_headline").within(() => {
+                        cy.findByText("Decrypting messages…").should("be.visible");
+                        cy.findByText("Verify this device to access all messages").should("be.visible");
+                    });
+
+                    checkTimelineNarrow();
+
+                    cy.get(".mx_DecryptionFailureBar").percySnapshotElement(
+                        "DecryptionFailureBar prompts user to verify",
+                        {
+                            widths: [320, 640],
+                        },
                     );
 
-                    cy.percySnapshot("DecryptionFailureBar prompts user to verify");
-
-                    cy.contains(".mx_DecryptionFailureBar_button", "Resend key requests").should("not.exist");
-                    cy.contains(".mx_DecryptionFailureBar_button", "Verify").click();
+                    cy.get(".mx_DecryptionFailureBar_end").within(() => {
+                        cy.findByText("Resend key requests").should("not.exist");
+                        cy.findByRole("button", { name: "Verify" }).click();
+                    });
 
                     const verificationRequestPromise = waitForVerificationRequest(otherDevice);
-                    cy.get(".mx_CompleteSecurity_actionRow .mx_AccessibleButton").click();
+                    cy.findByRole("button", { name: "Verify with another device" }).click();
+                    cy.findByText("To proceed, please accept the verification request on your other device.").should(
+                        "be.visible",
+                    );
                     cy.wrap(verificationRequestPromise).then((verificationRequest: VerificationRequest) => {
                         cy.wrap(verificationRequest.accept());
-                        handleVerificationRequest(verificationRequest).then((emojis) => {
+                        cy.wrap(
+                            handleVerificationRequest(verificationRequest),
+                            // extra timeout, as this sometimes takes a while
+                            { timeout: 30_000 },
+                        ).then((emojis: EmojiMapping[]) => {
                             cy.get(".mx_VerificationShowSas_emojiSas_block").then((emojiBlocks) => {
                                 emojis.forEach((emoji: EmojiMapping, index: number) => {
                                     expect(emojiBlocks[index].textContent.toLowerCase()).to.eq(emoji[0] + emoji[1]);
@@ -141,26 +155,38 @@ describe("Decryption Failure Bar", () => {
                         });
                     });
                 });
-            cy.contains(".mx_AccessibleButton", "They match").click();
+            cy.findByRole("button", { name: "They match" }).click();
             cy.get(".mx_VerificationPanel_verified_section .mx_E2EIcon_verified").should("exist");
-            cy.contains(".mx_AccessibleButton", "Got it").click();
+            cy.findByRole("button", { name: "Got it" }).click();
 
-            cy.get(".mx_DecryptionFailureBar .mx_DecryptionFailureBar_message_headline").should(
-                "have.text",
-                "Open another device to load encrypted messages",
-            );
+            cy.get(".mx_DecryptionFailureBar_start_headline").within(() => {
+                cy.findByText("Open another device to load encrypted messages").should("be.visible");
+            });
 
-            cy.percySnapshot(
+            checkTimelineNarrow();
+
+            cy.get(".mx_DecryptionFailureBar").percySnapshotElement(
                 "DecryptionFailureBar prompts user to open another device, with Resend Key Requests button",
+                {
+                    widths: [320, 640],
+                },
             );
 
             cy.intercept("/_matrix/client/r0/sendToDevice/m.room_key_request/*").as("keyRequest");
-            cy.contains(".mx_DecryptionFailureBar_button", "Resend key requests").click();
+            cy.findByRole("button", { name: "Resend key requests" }).click();
             cy.wait("@keyRequest");
-            cy.contains(".mx_DecryptionFailureBar_button", "Resend key requests").should("not.exist");
+            cy.get(".mx_DecryptionFailureBar_end").within(() => {
+                cy.findByText("Resend key requests").should("not.exist");
+                cy.findByRole("button", { name: "View your device list" }).should("be.visible");
+            });
 
-            cy.percySnapshot(
-                "DecryptionFailureBar prompts user to open another device, " + "without Resend Key Requests button",
+            checkTimelineNarrow();
+
+            cy.get(".mx_DecryptionFailureBar").percySnapshotElement(
+                "DecryptionFailureBar prompts user to open another device, without Resend Key Requests button",
+                {
+                    widths: [320, 640],
+                },
             );
         },
     );
@@ -169,41 +195,48 @@ describe("Decryption Failure Bar", () => {
         "should prompt the user to reset keys, if this device isn't verified " +
             "and there are no other verified devices or backups",
         () => {
-            cy.loginBot(synapse, testUser.username, testUser.password, {}).then(async (cli) => {
-                await cli.bootstrapCrossSigning({
-                    authUploadDeviceSigningKeys: async (makeRequest) => {
-                        await makeRequest({});
-                    },
-                    setupNewCrossSigning: true,
-                });
-                await cli.logout(true);
-            });
+            cy.loginBot(homeserver, testUser.username, testUser.password, { bootstrapCrossSigning: true }).then(
+                async (cli) => {
+                    await cli.logout(true);
+                },
+            );
 
             cy.botSendMessage(bot, roomId, "test");
-            cy.wait(5000);
-            cy.get(".mx_DecryptionFailureBar .mx_DecryptionFailureBar_message_headline").should(
-                "have.text",
-                "Reset your keys to prevent future decryption errors",
-            );
-
-            cy.percySnapshot("DecryptionFailureBar prompts user to reset keys");
-
-            cy.contains(".mx_DecryptionFailureBar_button", "Reset").click();
-
-            cy.get(".mx_Dialog").within(() => {
-                cy.contains(".mx_Dialog_primary", "Continue").click();
-                cy.get(".mx_CreateSecretStorageDialog_recoveryKey code").invoke("text").as("securityKey");
-                // Clicking download instead of Copy because of https://github.com/cypress-io/cypress/issues/2851
-                cy.contains(".mx_AccessibleButton", "Download").click();
-                cy.contains(".mx_Dialog_primary:not([disabled])", "Continue").click();
+            cy.get(".mx_DecryptionFailureBar_start_headline").within(() => {
+                cy.findByText("Reset your keys to prevent future decryption errors").should("be.visible");
             });
 
-            cy.get(".mx_DecryptionFailureBar .mx_DecryptionFailureBar_message_headline").should(
-                "have.text",
-                "Some messages could not be decrypted",
-            );
+            checkTimelineNarrow();
 
-            cy.percySnapshot("DecryptionFailureBar displays general message with no call to action");
+            cy.get(".mx_DecryptionFailureBar").percySnapshotElement("DecryptionFailureBar prompts user to reset keys", {
+                widths: [320, 640],
+            });
+
+            cy.findByRole("button", { name: "Reset" }).click();
+
+            // Set up key backup
+            cy.get(".mx_Dialog").within(() => {
+                cy.findByRole("button", { name: "Continue" }).click();
+                cy.get(".mx_CreateSecretStorageDialog_recoveryKey code").invoke("text").as("securityKey");
+                // Clicking download instead of Copy because of https://github.com/cypress-io/cypress/issues/2851
+                cy.findByRole("button", { name: "Download" }).click();
+                cy.get(".mx_Dialog_primary:not([disabled])").should("have.length", 3);
+                cy.findByRole("button", { name: "Continue" }).click();
+                cy.findByRole("button", { name: "Done" }).click();
+            });
+
+            cy.get(".mx_DecryptionFailureBar_start_headline").within(() => {
+                cy.findByText("Some messages could not be decrypted").should("be.visible");
+            });
+
+            checkTimelineNarrow(false); // button should not be rendered here
+
+            cy.get(".mx_DecryptionFailureBar").percySnapshotElement(
+                "DecryptionFailureBar displays general message with no call to action",
+                {
+                    widths: [320, 640],
+                },
+            );
         },
     );
 
@@ -217,11 +250,16 @@ describe("Decryption Failure Bar", () => {
         cy.get(".mx_DecryptionFailureBar").should("exist");
         cy.get(".mx_DecryptionFailureBar .mx_Spinner").should("exist");
 
-        cy.percySnapshot("DecryptionFailureBar displays loading spinner");
+        cy.get(".mx_DecryptionFailureBar").percySnapshotElement("DecryptionFailureBar displays loading spinner", {
+            allowSpinners: true,
+            widths: [320, 640],
+        });
+
+        checkTimelineNarrow();
 
         cy.wait(5000);
         cy.get(".mx_DecryptionFailureBar .mx_Spinner").should("not.exist");
-        cy.get(".mx_DecryptionFailureBar .mx_DecryptionFailureBar_icon").should("exist");
+        cy.findByTestId("decryption-failure-bar-icon").should("be.visible");
 
         cy.get(".mx_RoomView_messagePanel").scrollTo("top");
         cy.get(".mx_DecryptionFailureBar").should("not.exist");
@@ -231,5 +269,7 @@ describe("Decryption Failure Bar", () => {
 
         cy.get(".mx_RoomView_messagePanel").scrollTo("bottom");
         cy.get(".mx_DecryptionFailureBar").should("exist");
+
+        checkTimelineNarrow();
     });
 });

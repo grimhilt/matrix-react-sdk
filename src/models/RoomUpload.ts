@@ -20,7 +20,7 @@ import { IEncryptedFile } from "../customisations/models/IMediaEventContent";
 
 export class RoomUpload {
     public readonly abortController = new AbortController();
-    public promise: Promise<{ url?: string; file?: IEncryptedFile }>;
+    public promise?: Promise<{ url?: string; file?: IEncryptedFile }>;
     private uploaded = 0;
 
     public constructor(
@@ -30,7 +30,7 @@ export class RoomUpload {
         public fileSize = 0,
     ) {}
 
-    public onProgress(progress: UploadProgress) {
+    public onProgress(progress: UploadProgress): void {
         this.uploaded = progress.loaded;
         this.fileSize = progress.total;
     }

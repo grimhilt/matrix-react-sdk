@@ -14,9 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 import React from "react";
-import { fireEvent, render } from "@testing-library/react";
-import { act } from "react-dom/test-utils";
-import { CrossSigningInfo } from "matrix-js-sdk/src/crypto/CrossSigning";
+import { act, fireEvent, render } from "@testing-library/react";
 import { DeviceInfo } from "matrix-js-sdk/src/crypto/deviceinfo";
 import { sleep } from "matrix-js-sdk/src/utils";
 import { PUSHER_DEVICE_ID, PUSHER_ENABLED } from "matrix-js-sdk/src/@types/event";
@@ -30,16 +28,21 @@ describe("<DevicesPanel />", () => {
     const device1 = { device_id: "device_1" };
     const device2 = { device_id: "device_2" };
     const device3 = { device_id: "device_3" };
+    const mockCrypto = {
+        getDeviceVerificationStatus: jest.fn().mockResolvedValue({
+            crossSigningVerified: false,
+        }),
+    };
     const mockClient = getMockClientWithEventEmitter({
         ...mockClientMethodsUser(userId),
         getDevices: jest.fn(),
         getDeviceId: jest.fn().mockReturnValue(device1.device_id),
         deleteMultipleDevices: jest.fn(),
-        getStoredCrossSigningForUser: jest.fn().mockReturnValue(new CrossSigningInfo(userId, {}, {})),
         getStoredDevice: jest.fn().mockReturnValue(new DeviceInfo("id")),
         generateClientSecret: jest.fn(),
         getPushers: jest.fn(),
         setPusher: jest.fn(),
+        getCrypto: jest.fn().mockReturnValue(mockCrypto),
     });
 
     const getComponent = () => (
@@ -74,7 +77,7 @@ describe("<DevicesPanel />", () => {
 
         const toggleDeviceSelection = (container: HTMLElement, deviceId: string) =>
             act(() => {
-                const checkbox = container.querySelector(`#device-tile-checkbox-${deviceId}`);
+                const checkbox = container.querySelector(`#device-tile-checkbox-${deviceId}`)!;
                 fireEvent.click(checkbox);
             });
 
@@ -204,7 +207,7 @@ describe("<DevicesPanel />", () => {
 
             // close the modal without submission
             act(() => {
-                const modalCloseButton = document.querySelector('[aria-label="Close dialog"]');
+                const modalCloseButton = document.querySelector('[aria-label="Close dialog"]')!;
                 fireEvent.click(modalCloseButton);
             });
 

@@ -92,6 +92,7 @@ export const unmockClientPeg = () => jest.spyOn(MatrixClientPeg, "get").mockRest
  */
 export const mockClientMethodsUser = (userId = "@alice:domain") => ({
     getUserId: jest.fn().mockReturnValue(userId),
+    getSafeUserId: jest.fn().mockReturnValue(userId),
     getUser: jest.fn().mockReturnValue(new User(userId)),
     isGuest: jest.fn().mockReturnValue(false),
     mxcUrlToHttp: jest.fn().mockReturnValue("mock-mxcUrlToHttp"),
@@ -125,6 +126,7 @@ export const mockClientMethodsServer = (): Partial<Record<MethodLikeKeys<MatrixC
     getCapabilities: jest.fn().mockReturnValue({}),
     getClientWellKnown: jest.fn().mockReturnValue({}),
     doesServerSupportUnstableFeature: jest.fn().mockResolvedValue(false),
+    isVersionSupported: jest.fn().mockResolvedValue(false),
     getVersions: jest.fn().mockResolvedValue({}),
     isFallbackICEServerAllowed: jest.fn(),
 });
